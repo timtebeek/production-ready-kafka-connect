@@ -1,0 +1,299 @@
+# Production ready Kafka Connect
+
+Kafka Connect is a great tool for https://docs.confluent.io/platform/6.2.0/connect/index.html[streaming data between your Apache Kafka cluster and other data systems].
+Getting started with with Kafka Connect is fairly easy; there's https://www.confluent.io/hub/[hunderds of connectors avalable] to intregrate with data stores, cloud platfoms, other messaging systems and monitoring tools.
+Setting up a production grade installation is slightly more involved however, with documentation at times scattered across the web.
+
+In this post we'll setup a complete production grade Kafka Connect installation, highlighting some of the choices and configuration quirks along the way.
+
+For illustrative purposes we will setup a https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc[JDBC source connector] that publishes any new table rows onto a Kafka Topic, but you can substitute any other source or sink connector.
+
+We will setup:
+
+1. a Postgres database, with an orders table
+    - with https://www.adminer.org/[Adminer] to create new rows
+2. a local Kafka cluster using Docker Compose
+    - with Confluent Schema Registry to support Avro (de)serialization
+3. a Kafka Connect instance in distributed mode
+    - with AKHQ to more easily create and manage connectors
+4. a source connector from the Postgres table to a Kafka topic
+    - with database connection password as environment variable
+5. JMX metrics exported and scraped by Prometheus for monitoring
+
+https://github.com/timtebeek/TODO[All configuration is available on GitHub].
+
+== Setup Postgres database
+
+We will use a https://hub.docker.com/_/postgres[plain Postgres Docker image],
+with a database initialization script to quickly create our desired table with some rows.
+
+.Postgres Dockerfile with initialization script
+[source,Dockerfile]
+----
+include::db/Dockerfile[]
+----
+
+.Initialization script to create order table with two rows
+[source,sql]
+----
+include::db/create-table.sql[]
+----
+
+.Docker Compose instructions for Postgres
+[source,yaml]
+----
+include::docker-compose.yml[lines=12..20]
+----
+
+=== Adminer
+
+We setup https://www.adminer.org/[Adminer] to easily view, edit and create new table rows.
+
+.Docker Compose instructions for Adminer
+[source,yaml]
+----
+include::docker-compose.yml[lines=22..30]
+----
+
+== Setup local Kafka Cluster
+
+Next up we need a local Kafka Cluster. For simplicity we will use a single node cluster, without SSL.
+
+.Docker Compose instructions for ZooKeeper and Kafka
+[source,yaml]
+----
+include::docker-compose.yml[lines=31..61]
+----
+
+=== Confluent Schema Registry
+
+We also setup https://docs.confluent.io/platform/6.2.0/schema-registry/index.html[Confluent Schema Registry], as it provides a nice way to ensure compatibility between producers and consumers over time.
+
+.Docker Compose instructions for Confluent Schema Registry
+[source,yaml]
+----
+include::docker-compose.yml[lines=63..73]
+----
+
+== Kafka Connect instance
+
+With Postgres and Kafka running, we can now focus on setting up our Kafka Connect instance.
+To reiterate we have a few goals in setting up Kafka Connect:
+
+1. https://docs.confluent.io/platform/6.2.0/connect/userguide.html#standalone-vs-distributed-mode[Run in distributed mode, as it's fault tolerant]
+2. https://docs.confluent.io/platform/6.2.0/connect/userguide.html#configuring-key-and-value-converters[Use Confluent Schema Registry in message (de)serialization]
+3. Manage connectors through https://akhq.io/[AKHQ]
+
+Running in distributed mode is easy; it's the default when running the Docker image, and need only be changed if you're running a single agent, for instance to send web server logs to Kafka.
+
+We also need a few minor tweaks to the configuration to be able to work with our local single node cluster.
+On a production deployment you'd typically want to raise the replication factor to better match your Kafka cluster.
+
+.(Partial) Docker Compose instructions for Kafka Connect
+[source,yaml]
+----
+include::docker-compose.yml[lines=75..96]
+----
+
+Notice how all the environment variables share a common `CONNECT_` prefix.
+Any such prefixed environment variables are 
+https://docs.confluent.io/platform/6.2.0/installation/docker/config-reference.html#kconnect-long-configuration[converted according to a specific rule set], and made available to Kafka Connect.
+
+To (de)serialize messages using Avro by default, we add the following environment variables.
+
+.(Partial) Docker Compose instructions for Kafka Connect
+[source,yaml]
+----
+include::docker-compose.yml[lines=97..100]
+----
+
+While we won't cover SSL configuration in depth here, it's helpful to note there can be quite a bit of repetition involved when connecting to an SSL secured Kafka Cluster.
+Configuration is separate for the tool itself, storage of config, offset and status, as well as for consumers and producers.
+Taken all together you end up with something similar to these environment variables.
+
+.SSL Environment variables example
+[%collapsible]
+====
+[source,yaml]
+----
+CONNECT_SECURITY_PROTOCOL: 'SSL'
+CONNECT_SSL_KEY_PASSWORD: ''password'
+CONNECT_SSL_KEYSTORE_LOCATION: '/etc/confluent/keystore.jks'
+CONNECT_SSL_KEYSTORE_PASSWORD: ''password'
+CONNECT_SSL_TRUSTSTORE_LOCATION: '/etc/confluent/truststore.jks'
+CONNECT_SSL_TRUSTSTORE_PASSWORD: ''password'
+
+CONNECT_KAFKASTORE_SECURITY_PROTOCOL: 'SSL'
+CONNECT_KAFKASTORE_SSL_KEY_PASSWORD: ''password'
+CONNECT_KAFKASTORE_SSL_KEYSTORE_LOCATION: '/etc/confluent/keystore.jks'
+CONNECT_KAFKASTORE_SSL_KEYSTORE_PASSWORD: ''password'
+CONNECT_KAFKASTORE_SSL_TRUSTSTORE_LOCATION: '/etc/confluent/truststore.jks'
+CONNECT_KAFKASTORE_SSL_TRUSTSTORE_PASSWORD: ''password'
+
+CONNECT_PRODUCER_SECURITY_PROTOCOL: 'SSL'
+CONNECT_PRODUCER_SSL_KEY_PASSWORD: ''password'
+CONNECT_PRODUCER_SSL_KEYSTORE_LOCATION: '/etc/confluent/keystore.jks'
+CONNECT_PRODUCER_SSL_KEYSTORE_PASSWORD: ''password'
+CONNECT_PRODUCER_SSL_TRUSTSTORE_LOCATION: '/etc/confluent/truststore.jks'
+CONNECT_PRODUCER_SSL_TRUSTSTORE_PASSWORD: ''password'
+
+CONNECT_CONSUMER_SECURITY_PROTOCOL: 'SSL'
+CONNECT_CONSUMER_SSL_KEY_PASSWORD: ''password'
+CONNECT_CONSUMER_SSL_KEYSTORE_LOCATION: '/etc/confluent/keystore.jks'
+CONNECT_CONSUMER_SSL_KEYSTORE_PASSWORD: ''password'
+CONNECT_CONSUMER_SSL_TRUSTSTORE_LOCATION: '/etc/confluent/truststore.jks'
+CONNECT_CONSUMER_SSL_TRUSTSTORE_PASSWORD: ''password'
+----
+====
+
+=== AKHQ
+
+https://akhq.io/[AKHQ] is an adminstrative tool to explore and manage your topics, consumer groups, Schema Registry, Kafka Connect and more.
+
+.Docker Compose instructions for AKHQ
+[source,yaml]
+----
+include::docker-compose.yml[lines=110..129]
+----
+
+Once configured you get a web interface that allows you to easily add new connectors via: +
+http://localhost:8080/ui/docker-kafka-server/connect/connect/create
+
+== JDBC Source Connector
+
+Connectors can easily be installed through https://www.confluent.io/hub/[the Connector Hub].
+We add both the Avro Converter and JDBC Source/Sink plugins to our Docker image.
+
+.(Partial) Dockerfile for Kafka Connect with plugins
+[source,Dockerfile]
+----
+include::kafka-connect/Dockerfile[lines=1..5]
+----
+
+Once all the above is up and running we're ready to create our new JDBC Source connector to produce database records onto Kafka.
+
+1. http://localhost:8080/ui/docker-kafka-server/connect/connect/create[Open the local AKHQ URL to create a new connector].
+2. Select the `io.confluent.connect.jdbc.JdbcSourceConnector`
+3. Match the following property values to the input fields
+
+.JDBC Source Connector properties
+[source,properties]
+----
+include::kafka-connect/jdbc-source-table.properties[lines=1..10]
+----
+
+Notice how the input for is generated and provides you with details on most configuration options.
+Depending on your use case you might want to vary the `Table Loading Mode` as well as the applied `transforms`.
+
+=== Secrets
+
+As outlined at the start of this post, we do not want to store our Connector secrets as plain text in our Connector configuration.
+Luckily 
+https://docs.confluent.io/platform/6.2.0/connect/userguide.html#configprovider-interface[Kafka Connect contains a ConfigProvider Interface] which enables us to store are secrets separately and in a secure way.
+
+With the following environment variables added to our Kafka Connect instance, we enable the `FileConfigProvider`,
+which can read secret values from a file within the Docker image.
+
+.(Partial) Docker Compose instructions for Kafka Connect
+[source,yaml]
+----
+include::docker-compose.yml[lines=104..108]
+----
+
+Notice how the last environment combines with the Docker image propensity to write `CONNECT_` prefixed environment variables to a local file,
+https://docs.confluent.io/platform/6.2.0/installation/docker/config-reference.html#kconnect-long-configuration[following the aformentioned rule set].
+
+That enables us to refer to the value of the environment variable in our Connector config using the `${file:_filename_:_property_}` style.
+
+.JDBC Source Connector properties
+[source,properties]
+----
+include::kafka-connect/jdbc-source-table.properties[lines=5]
+----
+
+=== Transforms
+
+https://docs.confluent.io/platform/6.2.0/connect/transforms/overview.html[Single Message Transformations] allow you to make quick changes to the messages created before they are published onto Kafka.
+Quite a few transformations are already available by default, and we'll apply a couple to set our record key as a primitive, as well as set the schema name for our Avro values. 
+
+.Transforms JSON for
+[source,json]
+----
+{
+    // transforms = createKeyStruct,extractStructValue,addNamespace
+
+    // Extract order_id column value as record key primitive
+    "transforms.createKeyStruct.fields": "order_id",
+    "transforms.createKeyStruct.type": "org.apache.kafka.connect.transforms.ValueToKey",
+    "transforms.extractStructValue.field": "order_id",
+    "transforms.extractStructValue.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    // Set the Avro schema name for record value
+    "transforms.addNamespace.schema.name": "connect.Order",
+    "transforms.addNamespace.type": "org.apache.kafka.connect.transforms.SetSchemaMetadata$Value"
+}
+----
+
+Once created your connector should immediately became active and push records onto Kafka.
+After that, you can once again use AKHQ to explore the create topic, messages and Avro schema.
+
+The Avro schema can optionally be https://docs.confluent.io/platform/6.2.0/schema-registry/develop/maven-plugin.html[downloaded through the Schema Registry Maven Plugin] to create https://github.com/timtebeek/register-avro-schemas[compiled classes you can use in your applications].
+
+== JMX metrics exporter
+
+With our services and connector up and running, we want to be ensure the connector remains active, or be alerted if there are any issues.
+To this end we add the https://github.com/prometheus/jmx_exporter[Prometheus JMX Exporter agent] to our Kafka Connect image,
+as that's unfortunately https://github.com/confluentinc/kafka-images/issues/31[not yet available by default].
+
+.(Partial) Dockerfile for Kafka Connect with JMX exporter
+[source,Dockerfile]
+----
+include::kafka-connect/Dockerfile[lines=7..9]
+----
+
+.(Partial) Docker Compose instructions for Kafka Connect
+[source,yaml]
+----
+include::docker-compose.yml[lines=101..103]
+----
+
+Now helpfully, the JMX Exporter comes with a https://github.com/prometheus/jmx_exporter/blob/parent-0.15.0/example_configs/kafka-connect.yml[bespoke configuration file for Kafka Connect].
+
+.Show JMX Exporter configuration for Kafka Connect 
+[%collapsible]
+====
+.kafka-connect.yml
+[source,yaml]
+----
+include::kafka-connect/kafka-connect.yml[]
+----
+====
+
+While not specific to Kafka Connect, setting up the JMX Exporter, connecting it to Prometheus and even importing existing Grafana dashboards is https://www.confluent.io/blog/monitor-kafka-clusters-with-prometheus-grafana-and-confluent/[extensively covered on the Confluent Blog].
+
+
+=== Prometheus scraping
+
+TODO 
+
+.prometheus.yml
+[source,yaml]
+----
+include::prometheus/prometheus.yml[]
+----
+
+
+https://prometheus.io/docs/prometheus/2.28/configuration/configuration/
+
+http://kafka.apache.org/documentation/#connect_monitoring
+https://docs.confluent.io/home/connect/monitoring.html#using-jmx-to-monitor-kconnect
+https://stackoverflow.com/questions/50291157/which-jmx-metric-should-be-used-to-monitor-the-status-of-a-connector-in-kafka-co
+
+
+== Running it all together
+
+TODO 
+
+[source,bash]
+----
+docker-compose up --build --abort-on-container-exit --remove-orphans
+----
