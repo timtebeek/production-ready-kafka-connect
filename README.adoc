@@ -4,11 +4,11 @@ Kafka Connect is a great tool for https://docs.confluent.io/platform/6.2.0/conne
 Getting started with with Kafka Connect is fairly easy; there's https://www.confluent.io/hub/[hunderds of connectors avalable] to intregrate with data stores, cloud platfoms, other messaging systems and monitoring tools.
 Setting up a production grade installation is slightly more involved however, with documentation at times scattered across the web.
 
-In this post we'll setup a complete production grade Kafka Connect installation, highlighting some of the choices and configuration quirks along the way.
+In this post we'll set up a complete production grade Kafka Connect installation, highlighting some of the choices and configuration quirks along the way.
 
-For illustrative purposes we will setup a https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc[JDBC source connector] that publishes any new table rows onto a Kafka Topic, but you can substitute any other source or sink connector.
+For illustrative purposes we will set up a https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc[JDBC source connector] that publishes any new table rows onto a Kafka Topic, but you can substitute any other source or sink connector.
 
-We will setup:
+We will set up:
 
 1. a Postgres database, with an orders table
     - with https://www.adminer.org/[Adminer] to create new rows
@@ -20,9 +20,9 @@ We will setup:
     - with database connection password as environment variable
 5. JMX metrics exported and scraped by Prometheus for monitoring
 
-https://github.com/timtebeek/TODO[All configuration is available on GitHub].
+https://github.com/timtebeek/production-ready-kafka-connect[All configuration is available on GitHub].
 
-== Setup Postgres database
+== Set up Postgres database
 
 We will use a https://hub.docker.com/_/postgres[plain Postgres Docker image],
 with a database initialization script to quickly create our desired table with some rows.
@@ -68,7 +68,7 @@ VALUES
 
 === Adminer
 
-We setup https://www.adminer.org/[Adminer] to easily view, edit and create new table rows.
+We set up https://www.adminer.org/[Adminer] to easily view, edit and create new table rows.
 
 .Docker Compose instructions for Adminer
 [source,yaml]
@@ -83,7 +83,7 @@ We setup https://www.adminer.org/[Adminer] to easily view, edit and create new t
       - db
 ----
 
-== Setup local Kafka Cluster
+== Set up local Kafka Cluster
 
 Next up we need a local Kafka Cluster. For simplicity we will use a single node cluster, without SSL.
 
@@ -125,7 +125,7 @@ Next up we need a local Kafka Cluster. For simplicity we will use a single node 
 
 === Confluent Schema Registry
 
-We also setup https://docs.confluent.io/platform/6.2.0/schema-registry/index.html[Confluent Schema Registry], as it provides a nice way to ensure compatibility between producers and consumers over time.
+We also set up https://docs.confluent.io/platform/6.2.0/schema-registry/index.html[Confluent Schema Registry], as it provides a nice way to ensure compatibility between producers and consumers over time.
 
 .Docker Compose instructions for Confluent Schema Registry
 [source,yaml]
@@ -306,14 +306,14 @@ topic.prefix=connect.
 transforms=createKeyStruct,extractStructValue,addNamespace
 ----
 
-Notice how the input for is generated and provides you with details on most configuration options.
+Notice how the input form is generated and provides you with details on most configuration options.
 Depending on your use case you might want to vary the `Table Loading Mode` as well as the applied `transforms`.
 
 === Secrets
 
 As outlined at the start of this post, we do not want to store our Connector secrets as plain text in our Connector configuration.
 Luckily 
-https://docs.confluent.io/platform/6.2.0/connect/userguide.html#configprovider-interface[Kafka Connect contains a ConfigProvider Interface] which enables us to store are secrets separately and in a secure way.
+https://docs.confluent.io/platform/6.2.0/connect/userguide.html#configprovider-interface[Kafka Connect contains a ConfigProvider Interface] which enables us to store our secrets separately and in a secure way.
 
 With the following environment variables added to our Kafka Connect instance, we enable the `FileConfigProvider`,
 which can read secret values from a file within the Docker image.
@@ -344,12 +344,12 @@ connection.password=${file:/etc/kafka-connect/kafka-connect.properties:jdbc.sour
 https://docs.confluent.io/platform/6.2.0/connect/transforms/overview.html[Single Message Transformations] allow you to make quick changes to the messages created before they are published onto Kafka.
 Quite a few transformations are already available by default, and we'll apply a couple to set our record key as a primitive, as well as set the schema name for our Avro values. 
 
-.Transforms JSON for
+Notice how each of the ordered transformations configured under JDBC Source Connector properties are reflected below.
+
+.Individual transformation configuration for `transforms = createKeyStruct,extractStructValue,addNamespace`
 [source,json]
 ----
 {
-    // transforms = createKeyStruct,extractStructValue,addNamespace
-
     // Extract order_id column value as record key primitive
     "transforms.createKeyStruct.fields": "order_id",
     "transforms.createKeyStruct.type": "org.apache.kafka.connect.transforms.ValueToKey",
@@ -506,33 +506,16 @@ rules:
 ====
 
 While not specific to Kafka Connect, setting up the JMX Exporter, connecting it to Prometheus and even importing existing Grafana dashboards is https://www.confluent.io/blog/monitor-kafka-clusters-with-prometheus-grafana-and-confluent/[extensively covered on the Confluent Blog].
-
+That's also where you'll find https://github.com/confluentinc/jmx-monitoring-stacks[the link to the Confluent JMX Monitoring Stacks repository], which contains the resources to get you started with dashboards for monitoring.
 
 === Prometheus scraping
 
-TODO 
+As a final step we want Prometheus to scrape our JMX Exporter endpoints exposed above.
+For that to work we point prometheus to the correct host and port for Kafka-Connect.
 
-.prometheus.yml
+.(Partial) prometheus.yml
 [source,yaml]
 ----
-# my global config
-global:
-  scrape_interval:     15s # Set the scrape interval to every 15 seconds.
-  evaluation_interval: 15s # Evaluate rules every 15 seconds.
-  # scrape_timeout is set to the global default (10s).
-
-# Alertmanager configuration
-alerting:
-  alertmanagers:
-  - static_configs:
-    - targets:
-      # - alertmanager:9093
-
-# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
-rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
-
 # A scrape configuration containing exactly one endpoint to scrape:
 # Here it's Prometheus itself.
 scrape_configs:
@@ -549,21 +532,30 @@ scrape_configs:
     - targets: ['kafka-connect:9876']
 ----
 
-
-https://prometheus.io/docs/prometheus/2.28/configuration/configuration/
-
-http://kafka.apache.org/documentation/#connect_monitoring
-https://docs.confluent.io/home/connect/monitoring.html#using-jmx-to-monitor-kconnect
-https://stackoverflow.com/questions/50291157/which-jmx-metric-should-be-used-to-monitor-the-status-of-a-connector-in-kafka-co
+That should help get your JMX metrics in Prometheus for visualization in Grafana. +
+https://stackoverflow.com/questions/50291157/which-jmx-metric-should-be-used-to-monitor-the-status-of-a-connector-in-kafka-co[For alert rules have a look at this StackOverflow question and answer].
 
 
 == Running it all together
 
-TODO 
+Now that we've detailed all the steps, you'll likely want to try it out locally before you run it on your own systems.
+You can use the following command to launch all services in Docker Compose.
 
-[source,bash]
-----
-docker-compose up --build --abort-on-container-exit --remove-orphans
+1. Start Docker Compose
 
-docker-compose down --volumes
-----
+  [source,bash]
+  ----
+  docker-compose up --build --abort-on-container-exit --remove-orphans
+  ----
+
+2. Note that you will want to 
+http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ to deploy your new connector] before you will see a running connector.
+3. Next you might want to http://localhost:8082/?pgsql=db&username=postgres&db=orders&ns=public[launch Adminer to create new table rows].
+4. These new table rows should then show up in the AKHQ topic visualization.
+5. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
+
+  [source,bash]
+  ----
+  docker-compose down --volumes
+  ----
+
