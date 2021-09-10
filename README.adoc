@@ -30,19 +30,40 @@ with a database initialization script to quickly create our desired table with s
 .Postgres Dockerfile with initialization script
 [source,Dockerfile]
 ----
-include::db/Dockerfile[]
+FROM postgres:13-alpine
+ADD create-table.sql /docker-entrypoint-initdb.d/
 ----
 
 .Initialization script to create order table with two rows
 [source,sql]
 ----
-include::db/create-table.sql[]
+CREATE TABLE orders (
+	order_id SERIAL PRIMARY KEY,
+	status VARCHAR(10) NOT NULL,
+	notes VARCHAR(255) NOT NULL,
+	created_on TIMESTAMP NOT NULL,
+	last_modified TIMESTAMP
+);
+
+INSERT INTO "orders"
+	("order_id", "status", "notes", "created_on", "last_modified")
+VALUES
+	(1, 'PENDING', '', now(), NULL),
+	(2, 'ACCEPTED', 'Some notes', now(), now());
 ----
 
 .Docker Compose instructions for Postgres
 [source,yaml]
 ----
-include::docker-compose.yml[lines=12..20]
+  db:
+    build:
+      context: ./db
+    ports:
+    - 5432:5432
+    environment:
+    - POSTGRES_DB=orders
+    - POSTGRES_USER=postgres
+    - POSTGRES_PASSWORD=password
 ----
 
 === Adminer
@@ -52,7 +73,14 @@ We setup https://www.adminer.org/[Adminer] to easily view, edit and create new t
 .Docker Compose instructions for Adminer
 [source,yaml]
 ----
-include::docker-compose.yml[lines=22..30]
+  # http://localhost:8082/?pgsql=db&username=postgres&db=orders&ns=public
+  adminer:
+    image: adminer:4.8.1
+    restart: always
+    ports:
+      - 8082:8080
+    links:
+      - db
 ----
 
 == Setup local Kafka Cluster
@@ -62,7 +90,37 @@ Next up we need a local Kafka Cluster. For simplicity we will use a single node 
 .Docker Compose instructions for ZooKeeper and Kafka
 [source,yaml]
 ----
-include::docker-compose.yml[lines=31..61]
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.2.0
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data:Z
+      - zookeeper-log:/var/lib/zookeeper/log:Z
+    environment:
+      ZOOKEEPER_CLIENT_PORT: '2181'
+      ZOOKEEPER_ADMIN_ENABLE_SERVER: 'false'
+
+  kafka:
+    image: confluentinc/cp-kafka:6.2.0
+    volumes:
+      - kafka-data:/var/lib/kafka/data:Z
+    ports:
+      - 9091:9091
+    environment:
+      KAFKA_BROKER_ID: '0'
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_NUM_PARTITIONS: '12'
+      KAFKA_COMPRESSION_TYPE: 'gzip'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092'
+      KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE: 'false'
+      KAFKA_JMX_PORT: '9091'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_AUTHORIZER_CLASS_NAME: 'kafka.security.auth.SimpleAclAuthorizer'
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
+    links:
+      - zookeeper
 ----
 
 === Confluent Schema Registry
@@ -72,7 +130,17 @@ We also setup https://docs.confluent.io/platform/6.2.0/schema-registry/index.htm
 .Docker Compose instructions for Confluent Schema Registry
 [source,yaml]
 ----
-include::docker-compose.yml[lines=63..73]
+  schema-registry:
+    image: confluentinc/cp-schema-registry:6.2.0
+    depends_on:
+      - kafka
+    ports:
+      - 8081:8081
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'PLAINTEXT://kafka:9092'
+      SCHEMA_REGISTRY_HOST_NAME: 'schema-registry'
+      SCHEMA_REGISTRY_LISTENERS: 'http://0.0.0.0:8081'
+      SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: 'INFO'
 ----
 
 == Kafka Connect instance
@@ -92,7 +160,28 @@ On a production deployment you'd typically want to raise the replication factor 
 .(Partial) Docker Compose instructions for Kafka Connect
 [source,yaml]
 ----
-include::docker-compose.yml[lines=75..96]
+  kafka-connect:
+    build:
+      context: ./kafka-connect
+    ports:
+      - 8083:8083
+      - 9875:9875
+      - 9876:9876
+    depends_on:
+      - schema-registry
+      - db
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:9092'
+      CONNECT_GROUP_ID: 'kafka-connect'
+      CONNECT_REST_ADVERTISED_HOST_NAME: 'localhost'
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_CONFIG_STORAGE_TOPIC: 'connect-config-storage'
+      CONNECT_OFFSET_STORAGE_TOPIC: 'connect-offset-storage'
+      CONNECT_STATUS_STORAGE_TOPIC: 'connect-status-storage'
+      CONNECT_INTERNAL_KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_INTERNAL_VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
 ----
 
 Notice how all the environment variables share a common `CONNECT_` prefix.
@@ -104,7 +193,10 @@ To (de)serialize messages using Avro by default, we add the following environmen
 .(Partial) Docker Compose instructions for Kafka Connect
 [source,yaml]
 ----
-include::docker-compose.yml[lines=97..100]
+      # Default converter configuration
+      CONNECT_KEY_CONVERTER: 'org.apache.kafka.connect.storage.StringConverter'
+      CONNECT_VALUE_CONVERTER: 'io.confluent.connect.avro.AvroConverter'
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081/'
 ----
 
 While we won't cover SSL configuration in depth here, it's helpful to note there can be quite a bit of repetition involved when connecting to an SSL secured Kafka Cluster.
@@ -153,7 +245,26 @@ https://akhq.io/[AKHQ] is an adminstrative tool to explore and manage your topic
 .Docker Compose instructions for AKHQ
 [source,yaml]
 ----
-include::docker-compose.yml[lines=110..129]
+  akhq:
+    image: tchiotludo/akhq:0.18.0
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            docker-kafka-server:
+              properties:
+                bootstrap.servers: 'kafka:9092'
+              schema-registry:
+                url: 'http://schema-registry:8081'
+              connect:
+                - name: "connect"
+                  url: "http://kafka-connect:8083/"
+    ports:
+      - 8080:8080
+    links:
+      - kafka
+      - schema-registry
+      - kafka-connect
 ----
 
 Once configured you get a web interface that allows you to easily add new connectors via: +
@@ -167,7 +278,11 @@ We add both the Avro Converter and JDBC Source/Sink plugins to our Docker image.
 .(Partial) Dockerfile for Kafka Connect with plugins
 [source,Dockerfile]
 ----
-include::kafka-connect/Dockerfile[lines=1..5]
+FROM confluentinc/cp-kafka-connect-base:6.2.0
+
+# Install Avro & JDBC plugins
+RUN confluent-hub install --no-prompt confluentinc/kafka-connect-avro-converter:5.5.4
+RUN confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.1.1
 ----
 
 Once all the above is up and running we're ready to create our new JDBC Source connector to produce database records onto Kafka.
@@ -179,7 +294,16 @@ Once all the above is up and running we're ready to create our new JDBC Source c
 .JDBC Source Connector properties
 [source,properties]
 ----
-include::kafka-connect/jdbc-source-table.properties[lines=1..10]
+name=jdbc-source-orders
+connector.class=io.confluent.connect.jdbc.JdbcSourceConnector
+connection.url=jdbc:postgresql://db:5432/orders
+connection.user=postgres
+connection.password=${file:/etc/kafka-connect/kafka-connect.properties:jdbc.source.orders.password}
+incrementing.column.name=order_id
+mode=incrementing
+table.whitelist=orders
+topic.prefix=connect.
+transforms=createKeyStruct,extractStructValue,addNamespace
 ----
 
 Notice how the input for is generated and provides you with details on most configuration options.
@@ -197,7 +321,11 @@ which can read secret values from a file within the Docker image.
 .(Partial) Docker Compose instructions for Kafka Connect
 [source,yaml]
 ----
-include::docker-compose.yml[lines=104..108]
+      # Read connection password from file
+      CONNECT_CONFIG_PROVIDERS: "file"
+      CONNECT_CONFIG_PROVIDERS_FILE_CLASS: "org.apache.kafka.common.config.provider.FileConfigProvider"
+      # Store connection password in /etc/kafka-connect/kafka-connect.properties
+      CONNECT_JDBC_SOURCE_ORDERS_PASSWORD: password
 ----
 
 Notice how the last environment combines with the Docker image propensity to write `CONNECT_` prefixed environment variables to a local file,
@@ -208,7 +336,7 @@ That enables us to refer to the value of the environment variable in our Connect
 .JDBC Source Connector properties
 [source,properties]
 ----
-include::kafka-connect/jdbc-source-table.properties[lines=5]
+connection.password=${file:/etc/kafka-connect/kafka-connect.properties:jdbc.source.orders.password}
 ----
 
 === Transforms
@@ -247,13 +375,17 @@ as that's unfortunately https://github.com/confluentinc/kafka-images/issues/31[n
 .(Partial) Dockerfile for Kafka Connect with JMX exporter
 [source,Dockerfile]
 ----
-include::kafka-connect/Dockerfile[lines=7..9]
+# Install and configure JMX Exporter
+COPY jmx_prometheus_javaagent-0.15.0.jar /opt/
+COPY kafka-connect.yml /opt/
 ----
 
 .(Partial) Docker Compose instructions for Kafka Connect
 [source,yaml]
 ----
-include::docker-compose.yml[lines=101..103]
+      # Export JMX metrics to :9876/metrics for Prometheus
+      KAFKA_JMX_PORT: '9875'
+      KAFKA_OPTS: "-javaagent:/opt/jmx_prometheus_javaagent-0.15.0.jar=9876:/opt/kafka-connect.yml"
 ----
 
 Now helpfully, the JMX Exporter comes with a https://github.com/prometheus/jmx_exporter/blob/parent-0.15.0/example_configs/kafka-connect.yml[bespoke configuration file for Kafka Connect].
@@ -264,7 +396,112 @@ Now helpfully, the JMX Exporter comes with a https://github.com/prometheus/jmx_e
 .kafka-connect.yml
 [source,yaml]
 ----
-include::kafka-connect/kafka-connect.yml[]
+lowercaseOutputName: true
+rules:
+  #kafka.connect:type=app-info,client-id="{clientid}"
+  #kafka.consumer:type=app-info,client-id="{clientid}"
+  #kafka.producer:type=app-info,client-id="{clientid}"
+  - pattern: 'kafka.(.+)<type=app-info, client-id=(.+)><>start-time-ms'
+    name: kafka_$1_start_time_seconds
+    labels:
+      clientId: "$2"
+    help: "Kafka $1 JMX metric start time seconds"
+    type: GAUGE
+    valueFactor: 0.001 
+  - pattern: 'kafka.(.+)<type=app-info, client-id=(.+)><>(commit-id|version): (.+)'
+    name: kafka_$1_$3_info
+    value: 1
+    labels:
+      clientId: "$2"
+      $3: "$4"
+    help: "Kafka $1 JMX metric info version and commit-id"
+    type: GAUGE
+
+  #kafka.producer:type=producer-topic-metrics,client-id="{clientid}",topic="{topic}"", partition="{partition}"
+  #kafka.consumer:type=consumer-fetch-manager-metrics,client-id="{clientid}",topic="{topic}"", partition="{partition}"
+  - pattern: kafka.(.+)<type=(.+)-metrics, client-id=(.+), topic=(.+), partition=(.+)><>(.+-total|.+-rate|.+-avg|.+-replica|.+-lag|.+-lead)
+    name: kafka_$2_$6
+    labels:
+      clientId: "$3"
+      topic: "$4"
+      partition: "$5"
+    help: "Kafka $1 JMX metric type $2"
+    type: GAUGE
+
+  #kafka.producer:type=producer-topic-metrics,client-id="{clientid}",topic="{topic}"
+  #kafka.consumer:type=consumer-fetch-manager-metrics,client-id="{clientid}",topic="{topic}"", partition="{partition}"
+  - pattern: kafka.(.+)<type=(.+)-metrics, client-id=(.+), topic=(.+)><>(.+-total|.+-rate|.+-avg)
+    name: kafka_$2_$5
+    labels:
+      clientId: "$3"
+      topic: "$4"
+    help: "Kafka $1 JMX metric type $2"
+    type: GAUGE
+
+  #kafka.connect:type=connect-node-metrics,client-id="{clientid}",node-id="{nodeid}"
+  #kafka.consumer:type=consumer-node-metrics,client-id=consumer-1,node-id="{nodeid}"
+  - pattern: kafka.(.+)<type=(.+)-metrics, client-id=(.+), node-id=(.+)><>(.+-total|.+-avg)
+    name: kafka_$2_$5
+    labels:
+      clientId: "$3"
+      nodeId: "$4"
+    help: "Kafka $1 JMX metric type $2"
+    type: UNTYPED
+
+  #kafka.connect:type=kafka-metrics-count,client-id="{clientid}"
+  #kafka.consumer:type=consumer-fetch-manager-metrics,client-id="{clientid}"
+  #kafka.consumer:type=consumer-coordinator-metrics,client-id="{clientid}"
+  #kafka.consumer:type=consumer-metrics,client-id="{clientid}"
+  - pattern: kafka.(.+)<type=(.+)-metrics, client-id=(.*)><>(.+-total|.+-avg|.+-bytes|.+-count|.+-ratio|.+-rate|.+-age|.+-flight|.+-threads|.+-connectors|.+-tasks|.+-ago)
+    name: kafka_$2_$4
+    labels:
+      clientId: "$3"
+    help: "Kafka $1 JMX metric type $2"
+    type: GAUGE
+
+  #kafka.connect:type=connector-task-metrics,connector="{connector}",task="{task}<> status"
+  - pattern: 'kafka.connect<type=connector-task-metrics, connector=(.+), task=(.+)><>status: ([a-z-]+)'
+    name: kafka_connect_connector_status
+    value: 1
+    labels:
+      connector: "$1"
+      task: "$2"
+      status: "$3"
+    help: "Kafka Connect JMX Connector status"
+    type: GAUGE
+
+  #kafka.connect:type=task-error-metrics,connector="{connector}",task="{task}"
+  #kafka.connect:type=source-task-metrics,connector="{connector}",task="{task}"
+  #kafka.connect:type=sink-task-metrics,connector="{connector}",task="{task}"
+  #kafka.connect:type=connector-task-metrics,connector="{connector}",task="{task}"
+  - pattern: kafka.connect<type=(.+)-metrics, connector=(.+), task=(.+)><>(.+-total|.+-count|.+-ms|.+-ratio|.+-rate|.+-avg|.+-failures|.+-requests|.+-timestamp|.+-logged|.+-errors|.+-retries|.+-skipped)
+    name: kafka_connect_$1_$4
+    labels:
+      connector: "$2"
+      task: "$3"
+    help: "Kafka Connect JMX metric type $1"
+    type: GAUGE
+
+  #kafka.connect:type=connector-metrics,connector="{connector}"
+  #kafka.connect:type=connect-worker-metrics,connector="{connector}"
+  - pattern: kafka.connect<type=connect-worker-metrics, connector=(.+)><>([a-z-]+)
+    name: kafka_connect_worker_$2
+    labels:
+      connector: "$1"
+    help: "Kafka Connect JMX metric $1"
+    type: GAUGE
+
+  #kafka.connect:type=connect-worker-metrics
+  - pattern: kafka.connect<type=connect-worker-metrics><>([a-z-]+)
+    name: kafka_connect_worker_$1
+    help: "Kafka Connect JMX metric worker"
+    type: GAUGE
+
+  #kafka.connect:type=connect-worker-rebalance-metrics
+  - pattern: kafka.connect<type=connect-worker-rebalance-metrics><>([a-z-]+)
+    name: kafka_connect_worker_rebalance_$1
+    help: "Kafka Connect JMX metric rebalance information"
+    type: GAUGE
 ----
 ====
 
@@ -278,7 +515,38 @@ TODO
 .prometheus.yml
 [source,yaml]
 ----
-include::prometheus/prometheus.yml[]
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      # - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+    static_configs:
+    - targets: ['localhost:9090']
+
+    # Scrape Kafka Connect /metrics
+  - job_name: 'kafka-connect-host'
+    static_configs:
+    - targets: ['kafka-connect:9876']
 ----
 
 
@@ -296,4 +564,6 @@ TODO
 [source,bash]
 ----
 docker-compose up --build --abort-on-container-exit --remove-orphans
+
+docker-compose down --volumes
 ----
