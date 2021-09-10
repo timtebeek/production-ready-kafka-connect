@@ -543,10 +543,7 @@ You can use the following command to launch all services in Docker Compose.
 
 1. Start Docker Compose
 
-  [source,bash]
-  ----
   docker-compose up --build --abort-on-container-exit --remove-orphans
-  ----
 
 2. Note that you will want to 
 http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ to deploy your new connector] before you will see a running connector.
@@ -554,8 +551,4 @@ http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ 
 4. These new table rows should then show up in the AKHQ topic visualization.
 5. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
 
-  [source,bash]
-  ----
   docker-compose down --volumes
-  ----
-
