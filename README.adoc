@@ -273,7 +273,8 @@ http://localhost:8080/ui/docker-kafka-server/connect/connect/create
 == JDBC Source Connector
 
 Connectors can easily be installed through https://www.confluent.io/hub/[the Connector Hub].
-We add both the Avro Converter and JDBC Source/Sink plugins to our Docker image.
+We add both the https://www.confluent.io/hub/confluentinc/kafka-connect-avro-converter[Avro Converter]
+and https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc[JDBC Source/Sink] plugins to our Docker image.
 
 .(Partial) Dockerfile for Kafka Connect with plugins
 [source,Dockerfile]
