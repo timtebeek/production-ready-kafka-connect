@@ -86,6 +86,7 @@ We set up https://www.adminer.org/[Adminer] to easily view, edit and create new 
       - db
 ----
 
+Once up and running you will see the following table.
 
 .Adminer interface
 image::images/adminer.png[Adminer interface]
@@ -277,6 +278,7 @@ https://akhq.io/[AKHQ] is an adminstrative tool to explore and manage your topic
 Once configured you get a web interface that allows you to easily add new connectors via: +
 http://localhost:8080/ui/docker-kafka-server/connect/connect/create
 
+
 == JDBC Source Connector
 
 Connectors can easily be installed through https://www.confluent.io/hub/[the Connector Hub].
@@ -314,8 +316,33 @@ topic.prefix=connect.
 transforms=createKeyStruct,extractStructValue,addNamespace
 ----
 
+.Partial view of the Create a definition form
+image::images/connector.png[Create a definition form]
+
 Notice how the input form is generated and provides you with details on most configuration options.
 Depending on your use case you might want to vary the `Table Loading Mode` as well as the applied `transforms`.
+
+=== Transforms
+
+https://docs.confluent.io/platform/6.2.1/connect/transforms/overview.html[Single Message Transformations] allow you to make quick changes to the messages created before they are published onto Kafka.
+Quite a few transformations are already available by default, and we'll apply a couple to set our record key as a primitive, as well as set the schema name for our Avro values. 
+
+Notice how each of the ordered transformations configured under JDBC Source Connector properties are reflected below.
+
+.Individual transformation configuration for `transforms = createKeyStruct,extractStructValue,addNamespace`
+[source,json]
+----
+{
+    // Extract order_id column value as record key primitive
+    "transforms.createKeyStruct.fields": "order_id",
+    "transforms.createKeyStruct.type": "org.apache.kafka.connect.transforms.ValueToKey",
+    "transforms.extractStructValue.field": "order_id",
+    "transforms.extractStructValue.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    // Set the Avro schema name for record value
+    "transforms.addNamespace.schema.name": "connect.Order",
+    "transforms.addNamespace.type": "org.apache.kafka.connect.transforms.SetSchemaMetadata$Value"
+}
+----
 
 === Secrets
 
@@ -347,28 +374,8 @@ That enables us to refer to the value of the environment variable in our Connect
 connection.password=${file:/etc/kafka-connect/kafka-connect.properties:jdbc.source.orders.password}
 ----
 
-=== Transforms
 
-https://docs.confluent.io/platform/6.2.1/connect/transforms/overview.html[Single Message Transformations] allow you to make quick changes to the messages created before they are published onto Kafka.
-Quite a few transformations are already available by default, and we'll apply a couple to set our record key as a primitive, as well as set the schema name for our Avro values. 
-
-Notice how each of the ordered transformations configured under JDBC Source Connector properties are reflected below.
-
-.Individual transformation configuration for `transforms = createKeyStruct,extractStructValue,addNamespace`
-[source,json]
-----
-{
-    // Extract order_id column value as record key primitive
-    "transforms.createKeyStruct.fields": "order_id",
-    "transforms.createKeyStruct.type": "org.apache.kafka.connect.transforms.ValueToKey",
-    "transforms.extractStructValue.field": "order_id",
-    "transforms.extractStructValue.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
-    // Set the Avro schema name for record value
-    "transforms.addNamespace.schema.name": "connect.Order",
-    "transforms.addNamespace.type": "org.apache.kafka.connect.transforms.SetSchemaMetadata$Value"
-}
-----
-
+=== Create connector
 Once created your connector should immediately became active and push records onto Kafka.
 After that, you can once again use AKHQ to explore the create topic, messages and Avro schema.
 
@@ -518,7 +525,7 @@ That's also where you'll find https://github.com/confluentinc/jmx-monitoring-sta
 
 === Prometheus scraping
 
-As a final step we want Prometheus to scrape our JMX Exporter endpoints exposed above.
+Next we want Prometheus to scrape our JMX Exporter endpoints exposed above.
 For that to work we point prometheus to the correct host and port for Kafka-Connect.
 
 .(Partial) prometheus.yml
@@ -540,8 +547,18 @@ scrape_configs:
     - targets: ['kafka-connect:9876']
 ----
 
+.Prometheus scrape target status
+image::images/prometheus-scrape.png[Prometheus scrape target status]
+
 That should help get your JMX metrics in Prometheus for visualization in Grafana. +
 https://stackoverflow.com/questions/50291157/which-jmx-metric-should-be-used-to-monitor-the-status-of-a-connector-in-kafka-co[For alert rules have a look at this StackOverflow question and answer].
+
+== Grafana
+
+Finally we wire up a Grafana instance to connect to Prometheus as source, and load a custom dashboard that visualizes the Kafka Connect metrics stored in Prometheus.
+
+.Grafana Kafka Connect Overview Dashboard
+image::images/grafana.png[Grafana Kafka Connect Overview Dashboard]
 
 
 == Running it all together
@@ -555,8 +572,15 @@ You can use the following command to launch all services in Docker Compose.
 
 2. Note that you will want to 
 http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ to deploy your new connector] before you will see a running connector.
+
 3. Next you might want to http://localhost:8082/?pgsql=db&username=postgres&db=orders&ns=public[launch Adminer to create new table rows].
-4. These new table rows should then show up in the AKHQ topic visualization.
-5. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
+
+4. These new table rows should then show up in http://localhost:8080/ui/docker-kafka-server/topic/connect.orders/data?sort=Oldest&partition=All[the AKHQ topic visualization].
+
+5. Once the connector is up and running Prometheus will http://localhost:9090/targets[scrape the JMX metrics target].
+
+6. That will make the metrics available to the http://localhost:3000/d/kafka-connect-overview/kafka-connect-overview?orgId=1&refresh=1m[Grafana Kafka Connect Overview daashboard].
+
+7. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
 
   docker-compose down --volumes
