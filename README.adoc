@@ -547,15 +547,17 @@ scrape_configs:
     - targets: ['kafka-connect:9876']
 ----
 
-.Prometheus scrape target status
-image::images/prometheus-scrape.png[Prometheus scrape target status]
-
 That should help get your JMX metrics in Prometheus for visualization in Grafana. +
 https://stackoverflow.com/questions/50291157/which-jmx-metric-should-be-used-to-monitor-the-status-of-a-connector-in-kafka-co[For alert rules have a look at this StackOverflow question and answer].
 
+.Prometheus scrape target status
+image::images/prometheus-scrape.png[Prometheus scrape target status]
+
 == Grafana
 
-Finally we wire up a Grafana instance to connect to Prometheus as source, and load a custom dashboard that visualizes the Kafka Connect metrics stored in Prometheus.
+Finally we wire up a Grafana instance to connect to Prometheus as source, and load a custom dashboard based on
+https://github.com/confluentinc/jmx-monitoring-stacks[the Confluent JMX Monitoring repository]
+to visualize the Kafka Connect metrics stored in Prometheus.
 
 .Grafana Kafka Connect Overview Dashboard
 image::images/grafana.png[Grafana Kafka Connect Overview Dashboard]
@@ -581,6 +583,10 @@ http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ 
 
 6. That will make the metrics available to the http://localhost:3000/d/kafka-connect-overview/kafka-connect-overview?orgId=1&refresh=1m[Grafana Kafka Connect Overview daashboard].
 
-7. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
+7. You can view http://localhost:8080/ui/docker-kafka-server/schema?search=&page=1[the generated Avro schema in the schema registry].
+
+8. Optionally you can https://docs.confluent.io/platform/6.2.1/schema-registry/develop/maven-plugin.html#schema-registry-download[download the Avro schema] from the schema registry using the Schema Registry Maven Plugin, for code generation and use.
+
+9. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
 
   docker-compose down --volumes
