@@ -19,6 +19,7 @@ We will set up:
 4. a source connector from the Postgres table to a Kafka topic
     - with database connection password as environment variable
 5. JMX metrics exported and scraped by Prometheus for monitoring
+6. a Grafana dashboard to visualize & alert Connector status
 
 .Overview of interactions between components
 image::images/diagram.svg[Overview of interaction between components]
@@ -569,8 +570,11 @@ Now that we've detailed all the steps, you'll likely want to try it out locally 
 You can use the following command to launch all services in Docker Compose.
 
 1. Start Docker Compose
-
-  docker-compose up --build --abort-on-container-exit --remove-orphans
++
+[source,bash]
+----
+docker-compose up --build --abort-on-container-exit --remove-orphans
+----
 
 2. Note that you will want to 
 http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ to deploy your new connector] before you will see a running connector.
@@ -588,5 +592,8 @@ http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ 
 8. Optionally you can https://docs.confluent.io/platform/6.2.1/schema-registry/develop/maven-plugin.html#schema-registry-download[download the Avro schema] from the schema registry using the Schema Registry Maven Plugin, for code generation and use.
 
 9. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
-
-  docker-compose down --volumes
++
+[source,bash]
+----
+docker-compose down --volumes
+----
