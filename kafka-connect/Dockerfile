@@ -1,4 +1,4 @@
-FROM confluentinc/cp-kafka-connect-base:6.2.0
+FROM confluentinc/cp-kafka-connect-base:6.2.1
 
 # Install Avro & JDBC plugins
 RUN confluent-hub install --no-prompt confluentinc/kafka-connect-avro-converter:5.5.4
