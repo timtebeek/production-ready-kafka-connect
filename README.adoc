@@ -585,13 +585,13 @@ http://localhost:8080/ui/docker-kafka-server/connect/connect/create[launch AKHQ 
 
 5. Once the connector is up and running Prometheus will http://localhost:9090/targets[scrape the JMX metrics target].
 
-6. That will make the metrics available to the http://localhost:3000/d/kafka-connect-overview/kafka-connect-overview?orgId=1&refresh=1m[Grafana Kafka Connect Overview daashboard].
+6. That will make the metrics available to the http://localhost:3000/d/kafka-connect-overview/kafka-connect-overview?orgId=1&refresh=1m[Grafana Kafka Connect Overview dashboard].
 
 7. You can view http://localhost:8080/ui/docker-kafka-server/schema?search=&page=1[the generated Avro schema in the schema registry].
 
-8. Optionally you can https://docs.confluent.io/platform/6.2.1/schema-registry/develop/maven-plugin.html#schema-registry-download[download the Avro schema] from the schema registry using the Schema Registry Maven Plugin, for code generation and use.
+8. Optionally you can https://docs.confluent.io/platform/6.2.1/schema-registry/develop/maven-plugin.html#schema-registry-download[download the Avro schema] for code generation and use.
 
-9. Once you're done exploring you can shutdown Docker Compose and remove attached volumes
+9. Once you're done exploring you can shutdown Docker Compose and remove the attached volumes.
 +
 [source,bash]
 ----
