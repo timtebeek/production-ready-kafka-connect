@@ -13,6 +13,8 @@ component adminer as "Adminer"
 component prometheus as "Prometheus"
 component grafana as "Grafana"
 
+queue connect.orders
+
 kafka_brokers <-- schema_registry
 
 postgresql <-- adminer
@@ -24,6 +26,8 @@ postgresql <-- kafka_connect
 akhq -up-> kafka_brokers
 akhq -> schema_registry
 akhq --> kafka_connect
+
+kafka_connect --> connect.orders
 
 jmx_exporter <-- prometheus
 prometheus <-- grafana

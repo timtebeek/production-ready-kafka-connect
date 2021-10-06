@@ -14,7 +14,7 @@ We will set up:
     - with https://www.adminer.org/[Adminer] to create new rows
 2. a local Kafka cluster using Docker Compose
     - with Confluent Schema Registry to support Avro (de)serialization
-3. a Kafka Connect instance in distributed mode
+3. a Kafka Connect instance, in distributed mode
     - with AKHQ to more easily create and manage connectors
 4. a source connector from the Postgres table to a Kafka topic
     - with database connection password as environment variable
