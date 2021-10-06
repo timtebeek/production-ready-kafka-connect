@@ -1,6 +1,6 @@
 # Production ready Kafka Connect
 
-Kafka Connect is a great tool for https://docs.confluent.io/platform/6.2.0/connect/index.html[streaming data between your Apache Kafka cluster and other data systems].
+Kafka Connect is a great tool for https://docs.confluent.io/platform/6.2.1/connect/index.html[streaming data between your Apache Kafka cluster and other data systems].
 Getting started with with Kafka Connect is fairly easy; there's https://www.confluent.io/hub/[hunderds of connectors avalable] to intregrate with data stores, cloud platfoms, other messaging systems and monitoring tools.
 Setting up a production grade installation is slightly more involved however, with documentation at times scattered across the web.
 
@@ -21,7 +21,7 @@ We will set up:
 5. JMX metrics exported and scraped by Prometheus for monitoring
 
 .Overview of interactions between components
-image::diagram.svg[Overview of interaction between components]
+image::images/diagram.svg[Overview of interaction between components]
 
 https://github.com/timtebeek/production-ready-kafka-connect[All configuration is available on GitHub].
 
@@ -86,6 +86,10 @@ We set up https://www.adminer.org/[Adminer] to easily view, edit and create new 
       - db
 ----
 
+
+.Adminer interface
+image::images/adminer.png[Adminer interface]
+
 == Set up local Kafka Cluster
 
 Next up we need a local Kafka Cluster. For simplicity we will use a single node cluster, without SSL.
@@ -94,7 +98,7 @@ Next up we need a local Kafka Cluster. For simplicity we will use a single node 
 [source,yaml]
 ----
   zookeeper:
-    image: confluentinc/cp-zookeeper:6.2.0
+    image: confluentinc/cp-zookeeper:6.2.1
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data:Z
       - zookeeper-log:/var/lib/zookeeper/log:Z
@@ -103,7 +107,7 @@ Next up we need a local Kafka Cluster. For simplicity we will use a single node 
       ZOOKEEPER_ADMIN_ENABLE_SERVER: 'false'
 
   kafka:
-    image: confluentinc/cp-kafka:6.2.0
+    image: confluentinc/cp-kafka:6.2.1
     volumes:
       - kafka-data:/var/lib/kafka/data:Z
     ports:
@@ -128,13 +132,13 @@ Next up we need a local Kafka Cluster. For simplicity we will use a single node 
 
 === Confluent Schema Registry
 
-We also set up https://docs.confluent.io/platform/6.2.0/schema-registry/index.html[Confluent Schema Registry], as it provides a nice way to ensure compatibility between producers and consumers over time.
+We also set up https://docs.confluent.io/platform/6.2.1/schema-registry/index.html[Confluent Schema Registry], as it provides a nice way to ensure compatibility between producers and consumers over time.
 
 .Docker Compose instructions for Confluent Schema Registry
 [source,yaml]
 ----
   schema-registry:
-    image: confluentinc/cp-schema-registry:6.2.0
+    image: confluentinc/cp-schema-registry:6.2.1
     depends_on:
       - kafka
     ports:
@@ -151,8 +155,8 @@ We also set up https://docs.confluent.io/platform/6.2.0/schema-registry/index.ht
 With Postgres and Kafka running, we can now focus on setting up our Kafka Connect instance.
 To reiterate we have a few goals in setting up Kafka Connect:
 
-1. https://docs.confluent.io/platform/6.2.0/connect/userguide.html#standalone-vs-distributed-mode[Run in distributed mode, as it's fault tolerant]
-2. https://docs.confluent.io/platform/6.2.0/connect/userguide.html#configuring-key-and-value-converters[Use Confluent Schema Registry in message (de)serialization]
+1. https://docs.confluent.io/platform/6.2.1/connect/userguide.html#standalone-vs-distributed-mode[Run in distributed mode, as it's fault tolerant]
+2. https://docs.confluent.io/platform/6.2.1/connect/userguide.html#configuring-key-and-value-converters[Use Confluent Schema Registry in message (de)serialization]
 3. Manage connectors through https://akhq.io/[AKHQ]
 
 Running in distributed mode is easy; it's the default when running the Docker image, and need only be changed if you're running a single agent, for instance to send web server logs to Kafka.
@@ -189,7 +193,7 @@ On a production deployment you'd typically want to raise the replication factor 
 
 Notice how all the environment variables share a common `CONNECT_` prefix.
 Any such prefixed environment variables are 
-https://docs.confluent.io/platform/6.2.0/installation/docker/config-reference.html#kconnect-long-configuration[converted according to a specific rule set], and made available to Kafka Connect.
+https://docs.confluent.io/platform/6.2.1/installation/docker/config-reference.html#kconnect-long-configuration[converted according to a specific rule set], and made available to Kafka Connect.
 
 To (de)serialize messages using Avro by default, we add the following environment variables.
 
@@ -282,7 +286,7 @@ and https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc[JDBC Source/Sin
 .(Partial) Dockerfile for Kafka Connect with plugins
 [source,Dockerfile]
 ----
-FROM confluentinc/cp-kafka-connect-base:6.2.0
+FROM confluentinc/cp-kafka-connect-base:6.2.1
 
 # Install Avro & JDBC plugins
 RUN confluent-hub install --no-prompt confluentinc/kafka-connect-avro-converter:5.5.4
@@ -317,7 +321,7 @@ Depending on your use case you might want to vary the `Table Loading Mode` as we
 
 As outlined at the start of this post, we do not want to store our Connector secrets as plain text in our Connector configuration.
 Luckily 
-https://docs.confluent.io/platform/6.2.0/connect/userguide.html#configprovider-interface[Kafka Connect contains a ConfigProvider Interface] which enables us to store our secrets separately and in a secure way.
+https://docs.confluent.io/platform/6.2.1/connect/userguide.html#configprovider-interface[Kafka Connect contains a ConfigProvider Interface] which enables us to store our secrets separately and in a secure way.
 
 With the following environment variables added to our Kafka Connect instance, we enable the `FileConfigProvider`,
 which can read secret values from a file within the Docker image.
@@ -333,7 +337,7 @@ which can read secret values from a file within the Docker image.
 ----
 
 Notice how the last environment combines with the Docker image propensity to write `CONNECT_` prefixed environment variables to a local file,
-https://docs.confluent.io/platform/6.2.0/installation/docker/config-reference.html#kconnect-long-configuration[following the aformentioned rule set].
+https://docs.confluent.io/platform/6.2.1/installation/docker/config-reference.html#kconnect-long-configuration[following the aformentioned rule set].
 
 That enables us to refer to the value of the environment variable in our Connector config using the `${file:_filename_:_property_}` style.
 
@@ -345,7 +349,7 @@ connection.password=${file:/etc/kafka-connect/kafka-connect.properties:jdbc.sour
 
 === Transforms
 
-https://docs.confluent.io/platform/6.2.0/connect/transforms/overview.html[Single Message Transformations] allow you to make quick changes to the messages created before they are published onto Kafka.
+https://docs.confluent.io/platform/6.2.1/connect/transforms/overview.html[Single Message Transformations] allow you to make quick changes to the messages created before they are published onto Kafka.
 Quite a few transformations are already available by default, and we'll apply a couple to set our record key as a primitive, as well as set the schema name for our Avro values. 
 
 Notice how each of the ordered transformations configured under JDBC Source Connector properties are reflected below.
@@ -368,7 +372,7 @@ Notice how each of the ordered transformations configured under JDBC Source Conn
 Once created your connector should immediately became active and push records onto Kafka.
 After that, you can once again use AKHQ to explore the create topic, messages and Avro schema.
 
-The Avro schema can optionally be https://docs.confluent.io/platform/6.2.0/schema-registry/develop/maven-plugin.html[downloaded through the Schema Registry Maven Plugin] to create https://github.com/timtebeek/register-avro-schemas[compiled classes you can use in your applications].
+The Avro schema can optionally be https://docs.confluent.io/platform/6.2.1/schema-registry/develop/maven-plugin.html[downloaded through the Schema Registry Maven Plugin] to create https://github.com/timtebeek/register-avro-schemas[compiled classes you can use in your applications].
 
 == JMX metrics exporter
 
