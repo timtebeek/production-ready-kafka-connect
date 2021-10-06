@@ -20,6 +20,9 @@ We will set up:
     - with database connection password as environment variable
 5. JMX metrics exported and scraped by Prometheus for monitoring
 
+.Overview of interactions between components
+image::diagram.svg[Overview of interaction between components]
+
 https://github.com/timtebeek/production-ready-kafka-connect[All configuration is available on GitHub].
 
 == Set up Postgres database
